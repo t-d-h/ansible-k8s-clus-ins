@@ -1,0 +1,4 @@
+{{  ip1 }} master-01 
+{{  ip2 }} master-02 
+{{  ip3 }} master-03 
+127.0.0.1 localhost

@@ -1,0 +1,8 @@
+ cfssl gencert \
+-ca=/root/ca.pem \
+-ca-key=/root/ca-key.pem \
+-config=/root/cert/ca-config.json \
+-hostname=192.168.1.181,192.168.1.182,192.168.1.183,192.168.1.189,127.0.0.1,kubernetes.default \
+-profile=kubernetes /root/cert/kubernetes-csr.json | \
+cfssljson -bare kubernetes
+

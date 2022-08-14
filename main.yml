@@ -1,0 +1,496 @@
+#install necessary packages (eepalived)
+- hosts: master
+  tasks:
+  - name: install necessary packages
+    apt:
+      name: "{{  item  }}"
+      state: latest
+    loop:
+      - keepalived
+  - name: enable keepalived
+    service:
+      name: keepalived
+      enabled: yes
+#################################################################################### prepare nodes
+#prepare nodes (change hostname, edit /etc/hosts)
+- hosts: master
+  tasks:
+    - name: disable swap
+      command: sed -i '/ swap / s/^/#/' /etc/fstab
+    - name: change hostname of master-01
+      hostname: 
+        name: master-01
+      when: 
+        inventory_hostname == "master-01"
+    - name: change hostname of master-02
+      hostname: 
+        name: master-02
+      when: 
+        inventory_hostname == "master-02"
+    - name: change hostname of master-03
+      hostname: 
+        name: master-03
+      when: 
+        inventory_hostname == "master-03"
+    - name: Reboot host and wait for it to restart
+      reboot:
+        msg: "Reboot initiated by Ansible"
+        connect_timeout: 5
+        reboot_timeout: 600
+        pre_reboot_delay: 0
+        post_reboot_delay: 30
+# edit /etc/hosts       
+- hosts: master
+  vars:
+    - ip1: "{{ hostvars[groups['master'][0]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip2: "{{ hostvars[groups['master'][1]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip3: "{{ hostvars[groups['master'][2]]['ansible_eth0']['ipv4']['address'] }}"
+  tasks: 
+    - name: copy new /etc/hosts to all master nodes
+      template: 
+        src: ~/ansible-k8s-cluster/hosts
+        dest: /etc/hosts
+        force: yes
+
+#########################################################################################  Config keepalived     
+#this is the config for keepalived
+- hosts: master
+  vars:
+    - ip1: "{{ hostvars[groups['master'][0]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip2: "{{ hostvars[groups['master'][1]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip3: "{{ hostvars[groups['master'][2]]['ansible_eth0']['ipv4']['address'] }}"
+    - virtip: "{{ groups['virtip'][0] }}"
+  tasks:
+    - name: Create /etc/keepalived if not exist
+      file:
+        path: /etc/keepalived
+        state: directory
+        mode: '0777'
+    - name: copy script check status of virtual ip
+      template:
+        src: ~/ansible-k8s-cluster/keepalived/checkapi_server.sh
+        dest: /etc/keepalived/check_apiserver.sh
+- hosts: master-01
+  vars:
+    - virtip: "{{ groups['virtip'][0] }}"
+    - priority: 100
+  tasks:
+    - name: configuring keepalived for master-01
+      template:
+        src: ~/ansible-k8s-cluster/keepalived/keepalived.conf
+        dest: /etc/keepalived/keepalived.conf
+        force: yes
+    - name: restart keepalived
+      service: 
+        name: keepalived
+        state: restarted
+- hosts: master-02
+  vars:
+    - virtip: "{{ groups['virtip'][0] }}"
+    - priority: 99
+  tasks:
+    - name: configuring keepalived for master-01
+      template:
+        src: ~/ansible-k8s-cluster/keepalived/keepalived.conf
+        dest: /etc/keepalived/keepalived.conf
+        force: yes
+    - name: restart keepalived
+      service: 
+        name: keepalived
+        state: restarted
+- hosts: master-03
+  vars:
+    - virtip: "{{ groups['virtip'][0] }}"
+    - priority: 98
+  tasks:
+    - name: configuring keepalived for master-01
+      template:
+        src: ~/ansible-k8s-cluster/keepalived/keepalived.conf
+        dest: /etc/keepalived/keepalived.conf
+        force: yes
+    - name: restart keepalived
+      service: 
+        name: keepalived
+        state: restarted
+
+#Create certificate in master-01
+- hosts: master
+  vars:
+    - ip1: "{{ hostvars[groups['master'][0]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip2: "{{ hostvars[groups['master'][1]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip3: "{{ hostvars[groups['master'][2]]['ansible_eth0']['ipv4']['address'] }}"
+    - virtip: "{{ groups['virtip'][0] }}"
+  tasks:
+    - name: Create /root/cert in master-01
+      file:
+        path: /root/cert/
+        state: directory
+      when: 
+        inventory_hostname == "master-01"
+    - name: copy CloudflareSSL binary to master-01
+      copy: 
+        src: ~/ansible-k8s-cluster/SSL/cfssl_linux-amd64
+        dest: /usr/local/bin/cfssl
+        owner: root 
+        group: root
+        mode: 0777
+      when: 
+        inventory_hostname == "master-01"
+    - name: copy CloudflareSSL binary to master-01
+      copy: 
+        src: ~/ansible-k8s-cluster/SSL/cfssljson_linux-amd64
+        dest: /usr/local/bin/cfssljson 
+        owner: root 
+        group: root
+        mode: 0777
+      when: 
+        inventory_hostname == "master-01"
+    - name: copying some jsons . . 
+      copy: 
+        src: "{{  item  }}"
+        dest: /root/cert/
+        owner: root 
+        group: root
+        mode: 0777
+      with_items:
+        - ~/ansible-k8s-cluster/SSL/ca-config.json
+        - ~/ansible-k8s-cluster/SSL/ca-csr.json
+        - ~/ansible-k8s-cluster/SSL/kubernetes-csr.json
+      when: 
+        inventory_hostname == "master-01"
+    - name: copying cert generator
+      copy: 
+        src: "{{  item  }}"
+        dest: /root/cert/
+        owner: root 
+        group: root
+        mode: 0777
+      with_items:
+        - ~/ansible-k8s-cluster/SSL/gencert1
+        - ~/ansible-k8s-cluster/SSL/gencert2
+      when: 
+        inventory_hostname == "master-01"
+    - name: generate ca.pem
+      command: bash /root/cert/gencert1
+      when: 
+        inventory_hostname == "master-01"
+    - name: generate kubernetes.pem and kubernetes-key.pem
+      command: bash /root/cert/gencert2
+      when: 
+        inventory_hostname == "master-01"
+    - name: copy cert to ansible node
+      run_once: yes
+      fetch:
+        src: "{{  item  }}"
+        dest: ~/ansible-k8s-cluster/pem_key/
+        flat: yes
+      with_items:
+        - /root/ca.pem
+        - /root/kubernetes-key.pem
+        - /root/kubernetes.pem
+      when:
+        inventory_hostname=="master-01"
+
+################################################################################### create etcd cluster
+# Create user, Copy binaries and certs
+- hosts: master
+  tasks:
+    - name: Create user to execute etcd
+      user: 
+        name: etcd
+    - name: create etcd directory
+      file:
+        path: /etc/etcd/
+        state: directory
+        owner: etcd
+    - name: create etcd directory
+      file:
+        path: /var/lib/etcd/
+        state: directory
+        owner: etcd
+    - name: distribute certs to every master nodes
+      copy:
+        src: "{{  item  }}"
+        dest: /etc/etcd/
+        owner: etcd
+      with_items:
+        - ~/ansible-k8s-cluster/pem_key/ca.pem
+        - ~/ansible-k8s-cluster/pem_key/kubernetes-key.pem
+        - ~/ansible-k8s-cluster/pem_key/kubernetes.pem
+    - name: distribute etcd binary to every master nodes
+      copy:
+        src: "{{  item  }}"
+        dest: /usr/local/bin/
+        owner: etcd
+        mode: 0700
+      with_items:
+        - ~/ansible-k8s-cluster/etcd-v3.5.4/etcd
+        - ~/ansible-k8s-cluster/etcd-v3.5.4/etcdctl
+        - ~/ansible-k8s-cluster/etcd-v3.5.4/etcdutl
+# Create system daemon unit file for etcd
+- hosts: master
+  vars:
+    - ip: "{{ hostvars[groups['master'][0]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip1: "{{ hostvars[groups['master'][0]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip2: "{{ hostvars[groups['master'][1]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip3: "{{ hostvars[groups['master'][2]]['ansible_eth0']['ipv4']['address'] }}"
+    - hostname1: "{{  inventory_hostname  }}"
+  tasks:
+    - name: config system daemon for etcd in master-01
+      template:
+        src: ~/ansible-k8s-cluster/etcd-v3.5.4/etcd.service
+        dest: /etc/systemd/system/etcd.service
+        force: yes
+      when:
+        inventory_hostname=="master-01"
+    - name: reload system daemon
+      systemd:
+        name: etcd
+        daemon_reload: yes
+
+- hosts: master
+  vars:
+    - ip: "{{ hostvars[groups['master'][1]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip1: "{{ hostvars[groups['master'][0]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip2: "{{ hostvars[groups['master'][1]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip3: "{{ hostvars[groups['master'][2]]['ansible_eth0']['ipv4']['address'] }}"
+    - hostname1: "{{  inventory_hostname  }}"
+  tasks:
+    - name: config system daemon for etcd in master-02
+      template:
+        src: ~/ansible-k8s-cluster/etcd-v3.5.4/etcd.service
+        dest: /etc/systemd/system/etcd.service
+        force: yes
+      when:
+        inventory_hostname=="master-02"
+    - name: reload system daemon
+      systemd:
+        name: etcd
+        daemon_reload: yes
+
+- hosts: master
+  vars:
+    - ip: "{{ hostvars[groups['master'][2]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip1: "{{ hostvars[groups['master'][0]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip2: "{{ hostvars[groups['master'][1]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip3: "{{ hostvars[groups['master'][2]]['ansible_eth0']['ipv4']['address'] }}"
+    - hostname1: "{{  inventory_hostname  }}"
+  tasks:
+    - name: config system daemon for etcd in master-03
+      template:
+        src: ~/ansible-k8s-cluster/etcd-v3.5.4/etcd.service
+        dest: /etc/systemd/system/etcd.service
+        force: yes
+      when:
+        inventory_hostname=="master-03"
+    - name: reload system daemon
+      systemd:
+        name: etcd
+        daemon_reload: yes
+# start etcd.service
+- hosts: master
+  tasks:
+    - name: start and enable etcd service
+      service:
+        name: etcd
+        state: started
+        enabled: yes
+############################################################################################################################## Initialize k8s cluster with kubeadm
+#install docker
+- hosts: master ##################khi nao xong se chuyen doan nay thanh ca master va worker
+  tasks:
+  - name: install necessary packages for containerd
+    apt:
+      name: "{{  item  }}"
+      state: latest
+    loop:
+      - ca-certificates
+      - curl
+      - lsb-release
+- hosts: master
+  tasks: 
+  - name: create keyrings directory
+    file:
+      path: /etc/apt/keyrings
+      state: directory
+  - name: setup gpg key for docker
+    uri:
+      url: https://download.docker.com/linux/debian/gpg
+      dest: /root/key.txt
+  - name: gen gpg key
+    shell: cat /root/key.txt | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  - name:  copy source list
+    copy: 
+      src: ~/ansible-k8s-cluster/docker/docker.list
+      dest: /etc/apt/sources.list.d/docker.list 
+      mode: '0644'
+  - name: update
+    apt:
+      update_cache: yes   
+- hosts: master
+  tasks:
+  - name: Install containerd
+    apt:
+      name: "{{  item  }}"
+      state: latest
+    loop:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+- hosts: master
+  tasks:
+    - name: start and enable etcd service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+#config docker
+- hosts: master
+  tasks:
+    - name: 
+      copy:
+        src: ~/ansible-k8s-cluster/docker/config.toml
+        dest: /etc/containerd/config.toml
+        force: yes
+    - name: 
+      copy:
+        src: ~/ansible-k8s-cluster/docker/daemon.json
+        dest: /etc/docker/daemon.json
+        force: yes
+- hosts: master
+  tasks:
+    - name: restart containerd
+      service:
+        name: containerd
+        state: restarted
+#install kubelet 
+- hosts: master
+  tasks:
+    - name: add Google Cloud public signing key
+      uri:
+        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+        dest: /usr/share/keyrings/kubernetes-archive-keyring.gpg
+    - name: copy kubernetes.list to nodes
+      copy:
+        src: ~/ansible-k8s-cluster/kubernetes-config/kubernetes.list
+        dest: /etc/apt/sources.list.d/kubernetes.list
+        force: yes
+    - name: update
+      apt:
+        update_cache: yes   
+    - name: Install kubelet, kubeadm and its dependencies
+      apt:
+        name: "{{  item  }}"
+        state: latest
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+#config kubernetes
+- hosts: master
+  vars:
+    - ip: "{{ hostvars[groups['master'][2]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip1: "{{ hostvars[groups['master'][0]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip2: "{{ hostvars[groups['master'][1]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip3: "{{ hostvars[groups['master'][2]]['ansible_eth0']['ipv4']['address'] }}"
+    - virtip: "{{ groups['virtip'][0] }}"
+  tasks:
+  - name: copy network bridge config to master nodes
+    template: 
+      src: ~/ansible-k8s-cluster/kubernetes-config/k8s.conf
+      dest: /etc/sysctl.d/k8s.conf 
+      force: yes
+      mode: 0644
+  - name: copy Initialize config to master-01
+    template:
+      src: ~/ansible-k8s-cluster/kubernetes-config/config.yaml
+      dest: /root/config.yaml
+      force: yes
+    when:
+      inventory_hostname=="master-01"
+  - name: Init kubernetes on master-01
+    command: kubeadm init --config=/root/config.yaml
+    when:
+      inventory_hostname=="master-01"
+  - name: copy pki to Ansible controller
+    run_once: yes
+    fetch:
+      src: "{{  item  }}"
+      dest: ~/ansible-k8s-cluster/kubernetes-config/pki/
+      flat: yes
+    with_items:
+      - /etc/kubernetes/pki/ca.crt
+      - /etc/kubernetes/pki/ca.key
+      - /etc/kubernetes/pki/front-proxy-ca.crt
+      - /etc/kubernetes/pki/front-proxy-ca.key
+      - /etc/kubernetes/pki/front-proxy-client.key
+      - /etc/kubernetes/pki/front-proxy-client.crt
+      - /etc/kubernetes/pki/front-proxy-ca.crt
+      - /etc/kubernetes/pki/front-proxy-ca.key
+    when: 
+        inventory_hostname=="master-01"
+  - name: distribute pki to every master nodes
+    copy:
+      src: "{{  item  }}"
+      dest: /usr/local/bin/
+      owner: etcd
+      mode: 0700
+    with_items:
+      - ~/ansible-k8s-cluster/kubernetes-config/pki/ca.crt
+      - ~/ansible-k8s-cluster/kubernetes-config/pki/ca.key
+      - ~/ansible-k8s-cluster/kubernetes-config/pki/front-proxy-ca.crt
+      - ~/ansible-k8s-cluster/kubernetes-config/pki/front-proxy-ca.key
+      - ~/ansible-k8s-cluster/kubernetes-config/pki/front-proxy-client.key
+      - ~/ansible-k8s-cluster/kubernetes-config/pki/front-proxy-client.crt
+      - ~/ansible-k8s-cluster/kubernetes-config/pki/front-proxy-ca.crt
+      - ~/ansible-k8s-cluster/kubernetes-config/pki/front-proxy-ca.key
+- hosts: master-01
+  tasks: 
+  - name: get ready to apply Calico plugin
+    file:
+      path: /root/.kube
+      state: directory
+  - name: copy admin.conf
+    command: cp -i /etc/kubernetes/admin.conf /root/.kube/config
+  - name: apply calico on master-01
+    command: kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
+# join master-02 and master-03 to master-01 #####################################################script dang chay la phan o tren nay nhe
+- hosts: master
+  vars:
+    - ip: "{{ hostvars[groups['master'][1]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip1: "{{ hostvars[groups['master'][0]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip2: "{{ hostvars[groups['master'][1]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip3: "{{ hostvars[groups['master'][2]]['ansible_eth0']['ipv4']['address'] }}"
+    - hostname1: "{{  inventory_hostname  }}"
+    - virtip: "{{ groups['virtip'][0] }}"
+  tasks:
+    - name: copy config.yaml to master-02 node
+      template: 
+        src: ~/ansible-k8s-cluster/kubernetes-config/config2.yaml
+        dest: /root/config.yaml
+      when:
+        inventory_hostname=="master-02"
+    - name: Join master-02 to master-01
+      command: kubeadm init --config=/root/config.yaml
+      when:
+        inventory_hostname=="master-02"
+- hosts: master
+  vars:
+    - ip: "{{ hostvars[groups['master'][2]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip1: "{{ hostvars[groups['master'][0]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip2: "{{ hostvars[groups['master'][1]]['ansible_eth0']['ipv4']['address'] }}"
+    - ip3: "{{ hostvars[groups['master'][2]]['ansible_eth0']['ipv4']['address'] }}"
+    - hostname1: "{{  inventory_hostname  }}"
+    - virtip: "{{ groups['virtip'][0] }}"
+  tasks:
+    - name: copy config.yaml to master-03 node
+      template: 
+        src: ~/ansible-k8s-cluster/kubernetes-config/config2.yaml
+        dest: /root/config.yaml
+      when:
+        inventory_hostname=="master-03"
+    - name: Join master-03 master-01
+      command: kubeadm init --config=/root/config.yaml
+      when:
+        inventory_hostname=="master-03"
