@@ -274,6 +274,8 @@
       systemd:
         name: etcd
         daemon_reload: yes
+      when:
+        inventory_hostname=="master-02"
 # Create system daemon unit file for etcd for master-03
 - hosts: master
   vars:
@@ -294,6 +296,8 @@
       systemd:
         name: etcd
         daemon_reload: yes
+      when:
+        inventory_hostname=="master-03"
 # start etcd.service
 - hosts: master
   tasks:
