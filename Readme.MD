@@ -18,9 +18,9 @@ All you have to do is:
 - Run "ansible-playbook main.yml -i inventory" and let Ansible do the dirty work for you
 
 Note 1: You must have least 1 Ansible Controller node and 3 Master nodes
---
+
 Note 2: I have just tested with Ansible 2.7.7 and Debian 10, other systems use "apt" like Debian may run or not!!
---
+
 Note 3: After install, please wait about 3-5 mins to worker nodes get ready
 
 Feel free to contact me at hoantd@coccoc.com
