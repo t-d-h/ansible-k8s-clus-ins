@@ -1,5 +1,5 @@
 This is Ansbile playbook that install a High Available Master Node for Debian 10.
-Also it's my first project with Ansible too. Its means that maybe my playbook is stupid or not optimized or some what but at least, it works.
+Also it's my first project with Ansible too. It means that maybe my playbook is stupid or not optimized or some what but at least, it works.
 May be i will update it later if i have freetime.
 
 Scenarior of this playbook:
