@@ -1,4 +1,9 @@
-#install necessary packages (eepalived)
+################################################################################################
+#                                                                                              #
+############################ Install and config master nodes ###################################
+#                                                                                              #
+################################################################################################
+#install necessary packages (keepalived)
 - hosts: master
   tasks:
   - name: install necessary packages
@@ -11,12 +16,16 @@
     service:
       name: keepalived
       enabled: yes
-#################################################################################### prepare nodes
+################################################################################# prepare nodes
 #prepare nodes (change hostname, edit /etc/hosts)
-- hosts: master
+- hosts: kubernetes
   tasks:
     - name: disable swap
       command: sed -i '/ swap / s/^/#/' /etc/fstab
+    - name: disable swap
+      command: swapoff -a
+- hosts: master
+  tasks:
     - name: change hostname of master-01
       hostname: 
         name: master-01
@@ -39,7 +48,7 @@
         reboot_timeout: 600
         pre_reboot_delay: 0
         post_reboot_delay: 30
-# edit /etc/hosts       
+# edit /etc/hosts of master nodes
 - hosts: master
   vars:
     - ip1: "{{ hostvars[groups['master'][0]]['ansible_eth0']['ipv4']['address'] }}"
@@ -48,12 +57,11 @@
   tasks: 
     - name: copy new /etc/hosts to all master nodes
       template: 
-        src: ~/ansible-k8s-cluster/hosts
+        src: ~/ansible-k8s-cluster/hosts/hosts
         dest: /etc/hosts
         force: yes
 
 #########################################################################################  Config keepalived     
-#this is the config for keepalived
 - hosts: master
   vars:
     - ip1: "{{ hostvars[groups['master'][0]]['ansible_eth0']['ipv4']['address'] }}"
@@ -190,8 +198,7 @@
         - /root/kubernetes.pem
       when:
         inventory_hostname=="master-01"
-
-################################################################################### create etcd cluster
+################################################################################### Init etcd cluster
 # Create user, Copy binaries and certs
 - hosts: master
   tasks:
@@ -227,7 +234,7 @@
         - ~/ansible-k8s-cluster/etcd-v3.5.4/etcd
         - ~/ansible-k8s-cluster/etcd-v3.5.4/etcdctl
         - ~/ansible-k8s-cluster/etcd-v3.5.4/etcdutl
-# Create system daemon unit file for etcd
+# Create system daemon unit file for etcd for master-01
 - hosts: master
   vars:
     - ip: "{{ hostvars[groups['master'][0]]['ansible_eth0']['ipv4']['address'] }}"
@@ -247,7 +254,7 @@
       systemd:
         name: etcd
         daemon_reload: yes
-
+# Create system daemon unit file for etcd for master-02
 - hosts: master
   vars:
     - ip: "{{ hostvars[groups['master'][1]]['ansible_eth0']['ipv4']['address'] }}"
@@ -267,7 +274,7 @@
       systemd:
         name: etcd
         daemon_reload: yes
-
+# Create system daemon unit file for etcd for master-03
 - hosts: master
   vars:
     - ip: "{{ hostvars[groups['master'][2]]['ansible_eth0']['ipv4']['address'] }}"
@@ -295,9 +302,9 @@
         name: etcd
         state: started
         enabled: yes
-############################################################################################################################## Initialize k8s cluster with kubeadm
-#install docker
-- hosts: master ##################khi nao xong se chuyen doan nay thanh ca master va worker
+####################################################################################### Install Containerd and initialize k8s cluster with kubeadm
+#install docker/containerd
+- hosts: kubernetes
   tasks:
   - name: install necessary packages for containerd
     apt:
@@ -307,28 +314,22 @@
       - ca-certificates
       - curl
       - lsb-release
-- hosts: master
-  tasks: 
-  - name: create keyrings directory
+  - name: create keyrings directory if not exist
     file:
       path: /etc/apt/keyrings
       state: directory
   - name: setup gpg key for docker
-    uri:
+    apt_key:
       url: https://download.docker.com/linux/debian/gpg
-      dest: /root/key.txt
-  - name: gen gpg key
-    shell: cat /root/key.txt | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      state: present
   - name:  copy source list
     copy: 
       src: ~/ansible-k8s-cluster/docker/docker.list
       dest: /etc/apt/sources.list.d/docker.list 
-      mode: '0644'
+      mode: '0777'
   - name: update
     apt:
       update_cache: yes   
-- hosts: master
-  tasks:
   - name: Install containerd
     apt:
       name: "{{  item  }}"
@@ -338,15 +339,12 @@
       - docker-ce-cli
       - containerd.io
       - docker-compose-plugin
-- hosts: master
-  tasks:
-    - name: start and enable etcd service
-      service:
-        name: docker
-        state: started
-        enabled: yes
-#config docker
-- hosts: master
+  - name: start and enable containerd service
+    service:
+      name: containerd
+      state: started
+      enabled: yes
+- hosts: kubernetes
   tasks:
     - name: 
       copy:
@@ -358,15 +356,10 @@
         src: ~/ansible-k8s-cluster/docker/daemon.json
         dest: /etc/docker/daemon.json
         force: yes
-- hosts: master
-  tasks:
     - name: restart containerd
       service:
         name: containerd
         state: restarted
-#install kubelet 
-- hosts: master
-  tasks:
     - name: add Google Cloud public signing key
       uri:
         url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
@@ -433,9 +426,9 @@
   - name: distribute pki to every master nodes
     copy:
       src: "{{  item  }}"
-      dest: /usr/local/bin/
+      dest: /etc/kubernetes/pki/
       owner: etcd
-      mode: 0700
+      mode: 0744
     with_items:
       - ~/ansible-k8s-cluster/kubernetes-config/pki/ca.crt
       - ~/ansible-k8s-cluster/kubernetes-config/pki/ca.key
@@ -455,7 +448,7 @@
     command: cp -i /etc/kubernetes/admin.conf /root/.kube/config
   - name: apply calico on master-01
     command: kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
-# join master-02 and master-03 to master-01 #####################################################script dang chay la phan o tren nay nhe
+# join master-02 and master-03 to master-01 #####################################################
 - hosts: master
   vars:
     - ip: "{{ hostvars[groups['master'][1]]['ansible_eth0']['ipv4']['address'] }}"
@@ -475,15 +468,6 @@
       command: kubeadm init --config=/root/config.yaml
       when:
         inventory_hostname=="master-02"
-- hosts: master
-  vars:
-    - ip: "{{ hostvars[groups['master'][2]]['ansible_eth0']['ipv4']['address'] }}"
-    - ip1: "{{ hostvars[groups['master'][0]]['ansible_eth0']['ipv4']['address'] }}"
-    - ip2: "{{ hostvars[groups['master'][1]]['ansible_eth0']['ipv4']['address'] }}"
-    - ip3: "{{ hostvars[groups['master'][2]]['ansible_eth0']['ipv4']['address'] }}"
-    - hostname1: "{{  inventory_hostname  }}"
-    - virtip: "{{ groups['virtip'][0] }}"
-  tasks:
     - name: copy config.yaml to master-03 node
       template: 
         src: ~/ansible-k8s-cluster/kubernetes-config/config2.yaml
@@ -494,3 +478,23 @@
       command: kubeadm init --config=/root/config.yaml
       when:
         inventory_hostname=="master-03"
+- hosts: master-01
+  tasks:
+    - name: "create join command to /tmp/join.sh"
+      shell: "kubeadm token create --print-join-command > /tmp/join.sh"
+    - name: copy join script to Ansible controller
+      fetch:
+        src: /tmp/join.sh
+        dest: ~/ansible-k8s-cluster/kubernetes-config/join.sh
+        flat: yes
+        
+# Join worker to Cluster
+- hosts: worker
+  tasks:
+    - name: copy join script to worker nodes
+      copy:
+        src: ~/ansible-k8s-cluster/kubernetes-config/join.sh
+        dest: /root/join.sh
+        mode: 0777
+    - name: execute joint scrip in worker nodes
+      command: bash /root/join.sh
