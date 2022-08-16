@@ -1,6 +1,6 @@
 ################################################################################################
-#                                                                                              #
-############################ Install and config master nodes ###################################
+#                                                                                              #  
+#################Author of this stupid Playbook: hoantd@coccoc.com #############################
 #                                                                                              #
 ################################################################################################
 #install necessary packages (keepalived)
@@ -319,9 +319,11 @@
       path: /etc/apt/keyrings
       state: directory
   - name: setup gpg key for docker
-    apt_key:
+    uri:
       url: https://download.docker.com/linux/debian/gpg
-      state: present
+      dest: /root/key.txt
+  - name: gen gpg key
+    shell: cat /root/key.txt | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
   - name:  copy source list
     copy: 
       src: ~/ansible-k8s-cluster/docker/docker.list
