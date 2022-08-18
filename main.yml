@@ -484,4 +484,3 @@
         mode: 0777
     - name: execute joint scrip in worker nodes
       command: bash /root/join.sh
--
