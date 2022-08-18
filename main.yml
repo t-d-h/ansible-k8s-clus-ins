@@ -16,45 +16,25 @@
     service:
       name: keepalived
       enabled: yes
+
 ################################################################################# prepare nodes
-#prepare nodes (change hostname, edit /etc/hosts)
+#prepare nodes (disable swap, edit /etc/hosts)
 - hosts: kubernetes
   tasks:
     - name: disable swap
       command: sed -i '/ swap / s/^/#/' /etc/fstab
     - name: disable swap
       command: swapoff -a
-- hosts: master
-  tasks:
-    - name: change hostname of master-01
-      hostname: 
-        name: master-01
-      when: 
-        inventory_hostname == "master-01"
-    - name: change hostname of master-02
-      hostname: 
-        name: master-02
-      when: 
-        inventory_hostname == "master-02"
-    - name: change hostname of master-03
-      hostname: 
-        name: master-03
-      when: 
-        inventory_hostname == "master-03"
-    - name: Reboot host and wait for it to restart
-      reboot:
-        msg: "Reboot initiated by Ansible"
-        connect_timeout: 5
-        reboot_timeout: 600
-        pre_reboot_delay: 0
-        post_reboot_delay: 30
 # edit /etc/hosts of master nodes
 - hosts: master
   vars:
     - ip1: "{{ hostvars[groups['master'][0]]['ansible_eth0']['ipv4']['address'] }}"
     - ip2: "{{ hostvars[groups['master'][1]]['ansible_eth0']['ipv4']['address'] }}"
     - ip3: "{{ hostvars[groups['master'][2]]['ansible_eth0']['ipv4']['address'] }}"
-  tasks: 
+    - hostname01: "{{ hostvars[groups['master'][0]]['ansible_nodename'] }}"
+    - hostname02: "{{ hostvars[groups['master'][1]]['ansible_nodename'] }}"
+    - hostname03: "{{ hostvars[groups['master'][2]]['ansible_nodename'] }}"
+  tasks:
     - name: copy new /etc/hosts to all master nodes
       template: 
         src: ~/ansible-k8s-cluster/hosts/hosts
@@ -504,3 +484,4 @@
         mode: 0777
     - name: execute joint scrip in worker nodes
       command: bash /root/join.sh
+-
