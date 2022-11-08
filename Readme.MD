@@ -1,4 +1,4 @@
-Oct 2020 note: this playbook was to old and it should be deprecated
+Oct 2022 note: this playbook was to old and it should be deprecated
 ============================
 
 This is Ansbile playbook that install a High Available Master Node for Debian 10.
